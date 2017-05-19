@@ -7,7 +7,7 @@
   (:import [org.apache.curator.framework.recipes.cache PathChildrenCache
             PathChildrenCacheListener PathChildrenCache$StartMode PathChildrenCacheEvent$Type]
            [org.apache.zookeeper CreateMode]
-           [org.apache.zookeeper KeeperException$NodeExistsException]))
+           [org.apache.zookeeper KeeperException$NodeExistsException KeeperException$NoNodeException]))
 
 ;; Реализация распределенного master-less консьюмера кафки.
 ;; - Для координации  использует зукипер.
@@ -208,9 +208,13 @@
                        nil)))
         worker (a/go-loop []
                  (if-let [stopper' (tick)]
-                   (do (a/<! stop-ch)
-                       (a/<! (stopper'))
-                       (-> @(:curator kafka) .delete (.forPath path)))
+                   (do
+                     (a/<! stop-ch)
+                     (a/<! (stopper'))
+                     (try
+                       (-> @(:curator kafka) .delete (.forPath path))
+                       (catch KeeperException$NoNodeException e
+                         (log/warn "Trying to remove not existing node"))))
                    (a/alt!
                      stop-ch ([_] nil)
                      (a/timeout 100) (recur))))]

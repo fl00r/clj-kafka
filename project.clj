@@ -1,4 +1,4 @@
-(defproject ru.prepor/clj-kafka "0.4.10-SNAPSHOT"
+(defproject ru.prepor/clj-kafka "0.4.10"
   :description "FIXME: write description"
   :url "http://example.com/FIXME"
   :license {:name "Eclipse Public License"
@@ -7,7 +7,7 @@
                  ;; conflicts
                  [org.clojure/data.json "0.2.3"]
 
-                 [org.clojure/clojure "1.6.0"]
+                 [org.clojure/clojure "1.7.0"]
                  [org.clojure/tools.logging "0.3.1"]
                  [clj-kafka "0.2.8-0.8.1.1"
                   :exclusions [[log4j]
