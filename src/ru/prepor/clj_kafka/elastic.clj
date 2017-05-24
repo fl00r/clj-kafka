@@ -29,13 +29,14 @@
 ;; пользователю библиотеки, после чего удаляем лок в зукипере
 
 (defn zookeeper-path
-  [curator path & [{:keys [start-mode cache-data] :or {cache-data false}}]]
+  [curator path & [{:keys [on-reconnect-fn start-mode cache-data] :or {cache-data false}}]]
   (let [start-mode* (case start-mode
                       :normal PathChildrenCache$StartMode/NORMAL
                       :post-initialized-event
                       PathChildrenCache$StartMode/POST_INITIALIZED_EVENT)
         children-cache (PathChildrenCache. curator path cache-data)
-        out (a/chan)]
+        out (a/chan)
+        running (atom true)]
     (-> (.getListenable children-cache)
         (.addListener (reify PathChildrenCacheListener
                         (childEvent [this client event]
@@ -47,11 +48,16 @@
                             PathChildrenCacheEvent$Type/CHILD_REMOVED
                             (a/>!! out {:type :child-removed
                                         :path (-> event .getData .getPath)})
+                            PathChildrenCacheEvent$Type/CONNECTION_RECONNECTED
+                            (when (and on-reconnect-fn (not @running))
+                              (let [me (on-reconnect-fn)]
+                                (reset! running true)
+                                (log/debug "Zookeeper: reconnecting" me)))
                             PathChildrenCacheEvent$Type/CONNECTION_LOST
-                            (a/close! out)
+                            (reset! running false)
                             PathChildrenCacheEvent$Type/INITIALIZED
                             (a/>!! out {:type :initialized})
-                            nil)))))
+                            (log/warn (format "Zookeeper: Event %s" (.getType event))))))))
     (.start children-cache start-mode*)
     [(fn [] (.close children-cache) (a/close! out)) out]))
 
@@ -89,7 +95,7 @@
 (defn my-partitions
   [consumers me sorted-partitions]
   (when (seq consumers)
-    (let [n (.indexOf (vec (sort consumers)) me)
+    (let [n (.indexOf (vec (sort consumers)) @me)
           total (count consumers)]
       (->>
        (for [[i v] (map-indexed vector sorted-partitions)
@@ -264,9 +270,9 @@
 ;; Завершением остановки следует считать закрытие channels-канала
 (defn consumer
   [kafka {:keys [group topics init-offsets buf-or-n] :as params :or {init-offsets :latest}}]
-  (let [me (introduce-myself kafka group)
+  (let [me (atom (introduce-myself kafka group))
         partitions (all-partitions kafka topics)
-        initialized-zk-path (a/<!! (initialized-zookeeper-path @(:curator kafka) (format "/consumers/%s" group)))
+        initialized-zk-path (a/<!! (initialized-zookeeper-path @(:curator kafka) (format "/consumers/%s" group) {:on-reconnect-fn #(reset! me (introduce-myself kafka group))}))
         [stop-watch-consumers initial-consumers zk-consumers-ch] initialized-zk-path
         consumers-ch (consumers-accumulator initial-consumers zk-consumers-ch)
         partitions-changes-ch (partitions-solver consumers-ch me partitions)
